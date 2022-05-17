@@ -1,6 +1,6 @@
 ---
 title: "Homework 6"
-author: "PSTAT 131/231"
+author: "Allie Caughman"
 output:
     html_document:
       toc: true
@@ -11,6 +11,12 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE,
                       warning = FALSE)
+
+library(tidyverse)
+library(tidymodels)
+library(janitor)
+library(corrplot)
+library(rpart.plot)
 ```
 
 ## Tree-Based Models
@@ -35,20 +41,61 @@ Read in the data and set things up as in Homework 5:
 - Filter out the rarer Pokémon types
 - Convert `type_1` and `legendary` to factors
 
+```{r}
+pokemon = read_csv(here::here("data", "Pokemon.csv")) %>% #load in data
+  clean_names() %>%  #lowercase snake case all names
+  filter(type_1 %in% c("Bug", "Fire", "Grass", "Normal", "Water", "Psychic")) %>% #filter pokemon to only contain Bug, Fire, Grass, Normal, Water, and Psychic
+  mutate(type_1 = as.factor(type_1)) %>% #change type 1 to factor
+  mutate(legendary = as.factor(legendary)) %>%  #change legendary to factor
+  mutate(generation = as.factor(generation))
+```
+
 Do an initial split of the data; you can choose the percentage for splitting. Stratify on the outcome variable.
 
+```{r}
+split = initial_split(pokemon, strata = type_1, prob = .8) #create splitting vector
+
+poke_train = training(split) #get training data
+poke_test = testing(split) #get testing data
+```
+
+
 Fold the training set using *v*-fold cross-validation, with `v = 5`. Stratify on the outcome variable.
+
+```{r}
+folds = vfold_cv(poke_train, v = 5, strata = type_1) #create cross validation folds
+```
+
 
 Set up a recipe to predict `type_1` with `legendary`, `generation`, `sp_atk`, `attack`, `speed`, `defense`, `hp`, and `sp_def`:
 
 - Dummy-code `legendary` and `generation`;
 - Center and scale all predictors.
 
+```{r}
+poke_recipe = recipe(type_1 ~ legendary + generation + sp_atk + attack + speed + defense + hp + sp_def, data = poke_train) %>% #create model formula 
+  step_dummy(all_nominal_predictors()) %>% #dummy code categorical predictors
+  step_normalize(all_predictors()) #center and scale all predictors
+```
+
+
 ### Exercise 2
 
 Create a correlation matrix of the training set, using the `corrplot` package. *Note: You can choose how to handle the continuous variables for this plot; justify your decision(s).*
 
+
+**Answer:**
+
+```{r}
+pokemon %>% 
+  select(where(is.numeric)) %>% 
+  cor() %>% 
+  corrplot(type = "lower", method = "number")
+```
+
 What relationships, if any, do you notice? Do these relationships make sense to you?
+
+**Answer:**
 
 ### Exercise 3
 
@@ -105,3 +152,8 @@ Which classes was your model most accurate at predicting? Which was it worst at?
 ### Exercise 11
 
 Using the `abalone.txt` data from previous assignments, fit and tune a random forest model to predict `age`. Use stratified cross-validation and select ranges for `mtry`, `min_n`, and `trees`. Present your results. What was the model's RMSE on your testing set?
+
+```{r}
+
+```
+
