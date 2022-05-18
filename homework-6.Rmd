@@ -18,6 +18,7 @@ library(janitor)
 library(corrplot)
 library(rpart.plot)
 library(vip)
+library(kableExtra)
 
 set.seed(42)
 ```
@@ -131,16 +132,19 @@ Print an `autoplot()` of the results. What do you observe? Does a single decisio
 autoplot(tree_tune) #autoplot cost complexity tuning results
 ```
 
-**Answer:** The decision tree preforms better with smaller complexity penalties.
+**Answer:** The decision tree preforms better with smaller complexity penalties. It has a peak at mid level complexity.
 
 ### Exercise 4
 
-What is the `roc_auc` of your best-performing pruned decision tree on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
+What is the `roc_auc` of your best-performing pruned decision tree on the folds? 
 
 ```{r}
-collect_metrics(tree_tune) %>% #get roc auc of all models
+tree_metrics = collect_metrics(tree_tune) %>% #get roc auc of all models
   select(mean) %>% #select only mean
-  slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
+  slice_max(n = 1, order_by = mean) %>%  #get top AUC ROC by mean
+  mutate(model = "Decision Tree") #add model name
+
+tree_metrics$mean
 ```
 
 
@@ -175,6 +179,9 @@ rf_wflw = workflow() %>% #create new workflow
 ```
 
 **Answer:**
+* mtry = the number of predictors randomly sampled when creating each of the trees in the random forest
+* trees = the number of individual trees created in the random forest model
+* min_n = the number of data points included at each node in the decision tree required for the node to continue to be split
 
 Create a regular grid with 8 levels each. You can choose plausible ranges for each hyperparameter. Note that `mtry` should not be smaller than 1 or larger than 8. **Explain why not. What type of model would `mtry = 8` represent?**
 
@@ -186,7 +193,7 @@ rf_grid <- grid_regular(
   levels = 8) #use 8 levels
 ```
 
-**Answer:**
+**Answer:** A model with mtry = 8 represents a random forest where all the trees are identical because they all use all of the predictors in the model.
 
 ### Exercise 6
 
@@ -211,16 +218,19 @@ load(file = here::here("data", "rf.rda"))
 autoplot(rf_tune) #auotplot tuning results
 ```
 
-**Answer:**
+**Answer:** Minimal node size seems to have little effect on peak accuracy. In general, having a low number of predictors leads to lower accuracy, and this peaks around 3 predictors. It decreases slightly around 6-8 predictors. Number of trees also has minimal effect on accuracy once you have more than 10 trees in your model. 10 trees has lower accuracy than other combinations.
 
 ### Exercise 7
 
-What is the `roc_auc` of your best-performing random forest model on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
+What is the `roc_auc` of your best-performing random forest model on the folds? 
 
 ```{r}
-collect_metrics(rf_tune) %>% #get roc auc of all models
+rf_metrics = collect_metrics(rf_tune) %>% #get roc auc of all models
   select(mean) %>% #select only mean
-  slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
+  slice_max(n = 1, order_by = mean) %>%  #get top AUC ROC by mean
+  mutate(model = "Random Forest") #add model name
+
+rf_metrics$mean
 ```
 
 ### Exercise 8
@@ -234,13 +244,15 @@ rf_fit = fit(rf_final, poke_train) #fit final tree model to training data
 ```
 
 ```{r}
-#vip(rf_fit) #visualize the importance of variables
+rf_fit %>% 
+  extract_fit_engine() %>% #extract fit engine
+  vip() #visualize the importance of variables
 ```
 
 
 Which variables were most useful? Which were least useful? Are these results what you expected, or not?
 
-**Answer:**
+**Answer:** Special attack is the most important. Speed, attack, hp, special defense, and defense follow with similar levels of importance. Finally, generation and legendary status are the least important variable in the model.
 
 ### Exercise 9
 
@@ -281,16 +293,19 @@ load(file = here::here("data", "boost.rda"))
 autoplot(boost_tune) #auotplot tuning results
 ```
 
-What do you observe?
+What do you observe? 
 
-**Answer:**
+**Answer:** Low number of trees are the least accurate. ROC ACU peaks at around 800 trees and then slowly declines again.
 
-What is the `roc_auc` of your best-performing boosted tree model on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
+What is the `roc_auc` of your best-performing boosted tree model on the folds? 
 
 ```{r}
-collect_metrics(boost_tune) %>% #get roc auc of all models
+boost_metrics = collect_metrics(boost_tune) %>% #get roc auc of all models
   select(mean) %>% #select only mean
-  slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
+  slice_max(n = 1, order_by = mean) %>%  #get top AUC ROC by mean
+  mutate(model = "Boosted Trees") #Add model name
+
+boost_metrics$mean
 ```
 
 ### Exercise 10
@@ -298,16 +313,20 @@ collect_metrics(boost_tune) %>% #get roc auc of all models
 Display a table of the three ROC AUC values for your best-performing pruned tree, random forest, and boosted tree models. Which performed best on the folds? Select the best of the three and use `select_best()`, `finalize_workflow()`, and `fit()` to fit it to the *testing* set. 
 
 ```{r}
-rf_test_fit = fit(rf_final, poke_test) #fit poke testing data to best model: the random forest model
-```
+models = full_join(tree_metrics, rf_metrics)
+models = full_join(models, boost_metrics)
+
+models %>% 
+  kbl(digits = 2, col.names = c("ROC AUC", "Model")) %>%
+  kable_minimal()
+```   
 
 **Answer: ** The best model is the random forest model, with an AUC ROC of 0.727.
-
 
 Print the AUC value of your best-performing model on the testing set. Print the ROC curves. Finally, create and visualize a confusion matrix heat map.
 
 ```{r}
-rf_test_fit = augment(rf_test_fit, new_data = poke_test) #get predictions for test data
+rf_test_fit = augment(rf_fit, new_data = poke_test) #get predictions for test data
 
 roc_auc(rf_test_fit, truth = type_1, .pred_Bug, .pred_Fire, .pred_Grass, .pred_Normal, .pred_Water, .pred_Psychic) #print ROC AUC for test data
 ```
@@ -324,7 +343,7 @@ conf_mat(rf_test_fit, truth = type_1, estimate = .pred_class) %>% #calclate conf
 
 Which classes was your model most accurate at predicting? Which was it worst at?
 
-**Answer:** The model predicted normal, bug, fire, and grass Pokemon the best. It did not do a good job at predicting psychic or water pokemon
+**Answer:** The model best predicted bug and  normal pokemon. It did a poor job of predicting grass and water pokemon.
 
 ## For 231 Students
 
@@ -389,10 +408,16 @@ autoplot(abalone_rf_tune) #auotplot tuning results
 ```
 
 ```{r}
+select_best(abalone_rf_tune)
+```
+
+
+```{r}
 collect_metrics(abalone_rf_tune) %>% #get roc auc of all models
   select(mean) %>% #select only mean
   slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
 ```
+
 
 ```{r}
 abalone_rf_final = finalize_workflow(abalone_rf_wflw, select_best(abalone_rf_tune)) #finalize tree model workflow with best mtry, trees, and min_n parameters
