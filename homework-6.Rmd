@@ -17,6 +17,7 @@ library(tidymodels)
 library(janitor)
 library(corrplot)
 library(rpart.plot)
+library(vip)
 
 set.seed(42)
 ```
@@ -233,7 +234,7 @@ rf_fit = fit(rf_final, poke_train) #fit final tree model to training data
 ```
 
 ```{r}
-vip(rf_fit) #visualize the importance of variables
+#vip(rf_fit) #visualize the importance of variables
 ```
 
 
@@ -277,7 +278,7 @@ load(file = here::here("data", "boost.rda"))
 ```
 
 ```{r}
-autoplot(rf_tune) #auotplot tuning results
+autoplot(boost_tune) #auotplot tuning results
 ```
 
 What do you observe?
@@ -297,29 +298,33 @@ collect_metrics(boost_tune) %>% #get roc auc of all models
 Display a table of the three ROC AUC values for your best-performing pruned tree, random forest, and boosted tree models. Which performed best on the folds? Select the best of the three and use `select_best()`, `finalize_workflow()`, and `fit()` to fit it to the *testing* set. 
 
 ```{r}
-
+rf_test_fit = fit(rf_final, poke_test) #fit poke testing data to best model: the random forest model
 ```
 
-**Answer: **
+**Answer: ** The best model is the random forest model, with an AUC ROC of 0.727.
 
 
 Print the AUC value of your best-performing model on the testing set. Print the ROC curves. Finally, create and visualize a confusion matrix heat map.
 
 ```{r}
+rf_test_fit = augment(rf_test_fit, new_data = poke_test) #get predictions for test data
 
+roc_auc(rf_test_fit, truth = type_1, .pred_Bug, .pred_Fire, .pred_Grass, .pred_Normal, .pred_Water, .pred_Psychic) #print ROC AUC for test data
 ```
 
 ```{r}
-
+autoplot(roc_curve(rf_test_fit, truth = type_1, .pred_Bug, .pred_Fire, .pred_Grass, .pred_Normal, .pred_Water, .pred_Psychic)) #plot ROC curves for each class
 ```
 
 ```{r}
-
+conf_mat(rf_test_fit, truth = type_1, estimate = .pred_class) %>% #calclate confusion matrix
+  autoplot(type = "heatmap") + #autoplot with a heatmap
+  theme(axis.text.x = element_text(angle = 90, hjust=1)) #rotate x axis labels
 ```
 
 Which classes was your model most accurate at predicting? Which was it worst at?
 
-**Answer:**
+**Answer:** The model predicted normal, bug, fire, and grass Pokemon the best. It did not do a good job at predicting psychic or water pokemon
 
 ## For 231 Students
 
@@ -341,7 +346,7 @@ abalone_test = testing(abalone_split) #get testing data
 
 abalone_folds = vfold_cv(abalone_train, v = 5, strata = age) #create cross validation folds
 
-abalone_recipe = recipe(age ~ type + longest_shell + diameter + height + whole_weight + shucked_weight + viscera_weight + shell_weight, data = train) %>% #start recpite
+abalone_recipe = recipe(age ~ type + longest_shell + diameter + height + whole_weight + shucked_weight + viscera_weight + shell_weight, data = abalone_train) %>% #start recpite
   step_dummy(all_nominal_predictors()) %>% #1. create dummy variables
   step_interact(terms = ~ type:shucked_weight) %>% #2. add interactions
   step_interact(terms = ~ longest_shell:diameter) %>% 
@@ -369,7 +374,7 @@ abalone_rf_tune <- tune_grid( #use cross validation to tune mtry, trees, and min
   abalone_rf_wflw, #add workflow
   resamples = abalone_folds, #use cv folds
   grid = abalone_rf_grid, #add parameter grid 
-  metrics = metric_set(roc_auc) #tune based on ROC AUC
+  metrics = metric_set(rmse) #tune based on ROC AUC
   )
 ```
 
@@ -392,10 +397,12 @@ collect_metrics(abalone_rf_tune) %>% #get roc auc of all models
 ```{r}
 abalone_rf_final = finalize_workflow(abalone_rf_wflw, select_best(abalone_rf_tune)) #finalize tree model workflow with best mtry, trees, and min_n parameters
 
-abalone_rf_fit = fit(abalone_rf_final, abalone_test) #fit final tree model to training data
+abalone_rf_fit = fit(abalone_rf_final, abalone_train) #fit final rf model to training data
 ```
 
 ```{r}
-rmse(abalone_rf_fit) #get rmse for testing set
+augment(abalone_rf_fit, new_data = abalone_test) %>% #predict on test data
+  rmse(truth = age, estimate = .pred) #get rmse for testing set
 ```
 
+**Answer:** The RMSE for the testing data set is 2.10
