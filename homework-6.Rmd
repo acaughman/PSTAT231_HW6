@@ -17,6 +17,8 @@ library(tidymodels)
 library(janitor)
 library(corrplot)
 library(rpart.plot)
+
+set.seed(42)
 ```
 
 ## Tree-Based Models
@@ -83,69 +85,241 @@ poke_recipe = recipe(type_1 ~ legendary + generation + sp_atk + attack + speed +
 
 Create a correlation matrix of the training set, using the `corrplot` package. *Note: You can choose how to handle the continuous variables for this plot; justify your decision(s).*
 
-
-**Answer:**
+**Answer:** all numeric variables used in the model are included in the correlation plot.
 
 ```{r}
 pokemon %>% 
-  select(where(is.numeric)) %>% 
-  cor() %>% 
-  corrplot(type = "lower", method = "number")
+  select(where(is.numeric)) %>% #keep all numeric variables
+  select(-number, - total) %>% #remove variables not in model
+  cor() %>% #calcuate correlations
+  corrplot(type = "lower", method = "number", diag = FALSE) #plot correlations with numeric values
 ```
 
 What relationships, if any, do you notice? Do these relationships make sense to you?
 
-**Answer:**
+**Answer:** special defense and defense have the highest correlation. Attack and defense are also decently correlated, as well as special attack and special defense. Speed is also quite related to attack which makes sense. In general, more powerful Pokemon have higher values of all metrics so it makes sense they are correlated to an extent. Pokemon also tend to fall into 4 groups: strong in special attack/attack, strong in special defense/defense, strong in regular attack/defense, or strong in special attack/special defense, so the other correlations also make sense.
 
 ### Exercise 3
 
 First, set up a decision tree model and workflow. Tune the `cost_complexity` hyperparameter. Use the same levels we used in Lab 7 -- that is, `range = c(-3, -1)`. Specify that the metric we want to optimize is `roc_auc`. 
 
+```{r}
+tree_model = decision_tree(cost_complexity = tune()) %>% #set decision tree model with cost complexity tuned
+  set_engine("rpart") %>% #use r part engine
+  set_mode("classification") #set mode to classification
+
+tree_wflw = workflow() %>% #create new workflow
+  add_recipe(poke_recipe) %>% #add pokemon recipe
+  add_model(tree_model) #add decision tree model
+
+param_grid <- grid_regular(cost_complexity(range = c(-3, -1)), levels = 10) #create cost complexity gride ranged from -3 to -1
+```
+
+```{r}
+tree_tune <- tune_grid( #use cross validation to tune cost complexity
+  tree_wflw, #add workflow
+  resamples = folds, #use cv folds
+  grid = param_grid, #add parameter grid from -3 to -1
+  metrics = metric_set(roc_auc) #tune based on ROC AUC
+)
+```
+
 Print an `autoplot()` of the results. What do you observe? Does a single decision tree perform better with a smaller or larger complexity penalty?
+
+```{r}
+autoplot(tree_tune) #autoplot cost complexity tuning results
+```
+
+**Answer:** The decision tree preforms better with smaller complexity penalties.
 
 ### Exercise 4
 
 What is the `roc_auc` of your best-performing pruned decision tree on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
 
+```{r}
+collect_metrics(tree_tune) %>% #get roc auc of all models
+  select(mean) %>% #select only mean
+  slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
+```
+
+
 ### Exercise 5
 
 Using `rpart.plot`, fit and visualize your best-performing pruned decision tree with the *training* set.
+
+```{r}
+tree_final = finalize_workflow(tree_wflw, select_best(tree_tune)) #finalize tree model workflow with best complexity penalty parameter
+
+tree_fit = fit(tree_final, poke_train) #fit final tree model to training data
+```
+
+```{r}
+tree_fit %>%
+  extract_fit_engine() %>% #extract decision tree information from the fit
+  rpart.plot() #plot decision trees
+```
 
 ### Exercise 5
 
 Now set up a random forest model and workflow. Use the `ranger` engine and set `importance = "impurity"`. Tune `mtry`, `trees`, and `min_n`. Using the documentation for `rand_forest()`, explain in your own words what each of these hyperparameters represent.
 
+```{r}
+rf_model = rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>% #set random forest model to trun trees, mtry, and min_n parameters
+  set_engine("ranger", importance = "impurity") %>% #use ranger engine with importance set as impurity
+  set_mode("classification") #set mode as classification
+
+rf_wflw = workflow() %>% #create new workflow
+  add_recipe(poke_recipe) %>% #add pokemon recipe
+  add_model(rf_model) #add random forest model
+```
+
+**Answer:**
+
 Create a regular grid with 8 levels each. You can choose plausible ranges for each hyperparameter. Note that `mtry` should not be smaller than 1 or larger than 8. **Explain why not. What type of model would `mtry = 8` represent?**
+
+```{r}
+rf_grid <- grid_regular(
+  mtry(range = c(1, 8)), #set mtry to between 1 and 8
+  trees(range = c(10,2000)), #set tress to between 10 and 2000
+  min_n(range = c(2, 40)), # set min_n between 2 and 40
+  levels = 8) #use 8 levels
+```
+
+**Answer:**
 
 ### Exercise 6
 
 Specify `roc_auc` as a metric. Tune the model and print an `autoplot()` of the results. What do you observe? What values of the hyperparameters seem to yield the best performance?
 
+```{r, eval=FALSE}
+rf_tune <- tune_grid( #use cross validation to tune mtry, trees, and min_n parameters
+  rf_wflw, #add workflow
+  resamples = folds, #use cv folds
+  grid = rf_grid, #add parameter grid from -3 to -1
+  metrics = metric_set(roc_auc) #tune based on ROC AUC
+  )
+```
+
+```{r, include = FALSE}
+#save(rf_tune, file = here::here("data", "rf.rda"))
+
+load(file = here::here("data", "rf.rda"))
+```
+
+```{r}
+autoplot(rf_tune) #auotplot tuning results
+```
+
+**Answer:**
+
 ### Exercise 7
 
 What is the `roc_auc` of your best-performing random forest model on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
+
+```{r}
+collect_metrics(rf_tune) %>% #get roc auc of all models
+  select(mean) %>% #select only mean
+  slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
+```
 
 ### Exercise 8
 
 Create a variable importance plot, using `vip()`, with your best-performing random forest model fit on the *training* set.
 
+```{r}
+rf_final = finalize_workflow(rf_wflw, select_best(rf_tune)) #finalize tree model workflow with best mtry, trees, and min_n parameters
+
+rf_fit = fit(rf_final, poke_train) #fit final tree model to training data
+```
+
+```{r}
+vip(rf_fit) #visualize the importance of variables
+```
+
+
 Which variables were most useful? Which were least useful? Are these results what you expected, or not?
+
+**Answer:**
 
 ### Exercise 9
 
-Finally, set up a boosted tree model and workflow. Use the `xgboost` engine. Tune `trees`. Create a regular grid with 10 levels; let `trees` range from 10 to 2000. Specify `roc_auc` and again print an `autoplot()` of the results. 
+Finally, set up a boosted tree model and workflow. Use the `xgboost` engine. Tune `trees`. Create a regular grid with 10 levels; let `trees` range from 10 to 2000. Specify `roc_auc` and again print an `autoplot()` of the results.
+
+```{r}
+boost_model = boost_tree(trees = tune()) %>% #set up boosted tree model
+  set_engine("xgboost") %>% #use xgboost engine
+  set_mode("classification") #set mode to classification
+
+boost_wflw = workflow() %>% #create new workflow
+  add_recipe(poke_recipe) %>% #add pokemon recipe
+  add_model(boost_model) #add random forest model
+```
+
+```{r}
+boost_grid <- grid_regular(
+  trees(range = c(10,2000)), #set tress to between 10 and 2000
+  levels = 8) #use 8 levels
+```
+
+```{r, eval=FALSE}
+boost_tune <- tune_grid( #use cross validation to tune trees parameter
+  boost_wflw, #add workflow
+  resamples = folds, #use cv folds
+  grid = boost_grid, #add parameter grid from -3 to -1
+  metrics = metric_set(roc_auc) #tune based on ROC AUC
+  )
+```
+
+```{r, include = FALSE}
+#save(boost_tune, file = here::here("data", "boost.rda"))
+
+load(file = here::here("data", "boost.rda"))
+```
+
+```{r}
+autoplot(rf_tune) #auotplot tuning results
+```
 
 What do you observe?
 
+**Answer:**
+
 What is the `roc_auc` of your best-performing boosted tree model on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
+
+```{r}
+collect_metrics(boost_tune) %>% #get roc auc of all models
+  select(mean) %>% #select only mean
+  slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
+```
 
 ### Exercise 10
 
 Display a table of the three ROC AUC values for your best-performing pruned tree, random forest, and boosted tree models. Which performed best on the folds? Select the best of the three and use `select_best()`, `finalize_workflow()`, and `fit()` to fit it to the *testing* set. 
 
+```{r}
+
+```
+
+**Answer: **
+
+
 Print the AUC value of your best-performing model on the testing set. Print the ROC curves. Finally, create and visualize a confusion matrix heat map.
 
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
 Which classes was your model most accurate at predicting? Which was it worst at?
+
+**Answer:**
 
 ## For 231 Students
 
@@ -154,6 +328,74 @@ Which classes was your model most accurate at predicting? Which was it worst at?
 Using the `abalone.txt` data from previous assignments, fit and tune a random forest model to predict `age`. Use stratified cross-validation and select ranges for `mtry`, `min_n`, and `trees`. Present your results. What was the model's RMSE on your testing set?
 
 ```{r}
+abalone_full = read_csv(here::here("data", "abalone.csv")) %>%  #read in data
+  mutate(type = as.factor(type)) #turn type into factor
 
+abalone = abalone_full %>% 
+  mutate(age = 1.5 + rings) #create age from 1.5 + rings
+
+abalone_split = initial_split(abalone, prop = .75, strata = age) #create the split straified by age
+
+abalone_train = training(abalone_split) #get training data
+abalone_test = testing(abalone_split) #get testing data
+
+abalone_folds = vfold_cv(abalone_train, v = 5, strata = age) #create cross validation folds
+
+abalone_recipe = recipe(age ~ type + longest_shell + diameter + height + whole_weight + shucked_weight + viscera_weight + shell_weight, data = train) %>% #start recpite
+  step_dummy(all_nominal_predictors()) %>% #1. create dummy variables
+  step_interact(terms = ~ type:shucked_weight) %>% #2. add interactions
+  step_interact(terms = ~ longest_shell:diameter) %>% 
+  step_interact(terms = ~ shucked_weight:shell_weight) %>% 
+  step_center(all_predictors()) %>% #center all predictors
+  step_scale(all_predictors()) #scale all predictors
+
+abalone_rf = rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>% #set random forest model to trun trees, mtry, and min_n parameters
+  set_engine("ranger", importance = "impurity") %>% #use ranger engine with importance set as impurity
+  set_mode("regression") #set mode as regression
+
+abalone_rf_wflw = workflow() %>% #create new workflow
+  add_recipe(abalone_recipe) %>% #add pokemon recipe
+  add_model(abalone_rf) #add random forest model
+
+abalone_rf_grid <- grid_regular(
+  mtry(range = c(1, 8)), #set mtry to between 1 and 8
+  trees(range = c(10,2000)), #set tress to between 1 and 2000
+  min_n(range = c(2, 40)), # set min_n between 2 and 40
+  levels = 8) #use 8 levels
+```
+
+```{r, eval=FALSE}
+abalone_rf_tune <- tune_grid( #use cross validation to tune mtry, trees, and min_n parameters
+  abalone_rf_wflw, #add workflow
+  resamples = abalone_folds, #use cv folds
+  grid = abalone_rf_grid, #add parameter grid 
+  metrics = metric_set(roc_auc) #tune based on ROC AUC
+  )
+```
+
+```{r, include = FALSE}
+#save(abalone_rf_tune, file = here::here("data", "abalone_rf.rda"))
+
+load(file = here::here("data", "abalone_rf.rda"))
+```
+
+```{r}
+autoplot(abalone_rf_tune) #auotplot tuning results
+```
+
+```{r}
+collect_metrics(abalone_rf_tune) %>% #get roc auc of all models
+  select(mean) %>% #select only mean
+  slice_max(n = 1, order_by = mean) #get top AUC ROC by mean
+```
+
+```{r}
+abalone_rf_final = finalize_workflow(abalone_rf_wflw, select_best(abalone_rf_tune)) #finalize tree model workflow with best mtry, trees, and min_n parameters
+
+abalone_rf_fit = fit(abalone_rf_final, abalone_test) #fit final tree model to training data
+```
+
+```{r}
+rmse(abalone_rf_fit) #get rmse for testing set
 ```
 
